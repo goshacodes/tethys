@@ -1,12 +1,13 @@
 package tethys
+
 import tethys.readers.{FieldName, ReaderError}
 import tethys.readers.tokens.TokenIterator
 
-trait StringEnumReader[A] extends JsonReader[A]
+trait StringEnumJsonReader[A] extends JsonReader[A]
 
-object StringEnumReader:
-  inline def derived[A <: scala.reflect.Enum]: StringEnumReader[A] =
-    new StringEnumReader[A]:
+object StringEnumJsonReader:
+  inline def derived[A <: scala.reflect.Enum]: StringEnumJsonReader[A] =
+    new StringEnumJsonReader[A]:
       def read(it: TokenIterator)(implicit fieldName: FieldName): A =
         if it.currentToken().isStringValue then
           val res = it.string()

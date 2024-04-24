@@ -3,11 +3,11 @@ package tethys
 import tethys.readers.{FieldName, ReaderError}
 import tethys.readers.tokens.TokenIterator
 
-trait OrdinalEnumReader[A] extends JsonReader[A]
+trait OrdinalEnumJsonReader[A] extends JsonReader[A]
 
-object OrdinalEnumReader:
-  inline def derived[A <: scala.reflect.Enum]: OrdinalEnumReader[A] =
-    new OrdinalEnumReader[A]:
+object OrdinalEnumJsonReader:
+  inline def derived[A <: scala.reflect.Enum]: OrdinalEnumJsonReader[A] =
+    new OrdinalEnumJsonReader[A]:
       def read(it: TokenIterator)(implicit fieldName: FieldName): A =
         if it.currentToken().isNumberValue then
           val res = it.int()
