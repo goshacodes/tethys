@@ -36,7 +36,7 @@ trait SemiautoDerivation {
 
   @deprecated("Use JsonReader.derived instead")
   inline def jsonReader[T]: JsonReader[T] =
-    JsonReader.derived[T](using scala.compiletime.summonInline[scala.deriving.Mirror.ProductOf[T]])
+    JsonReader.derived[T](using scala.compiletime.summonInline[scala.deriving.Mirror.Of[T]])
 
   inline def jsonReader[T](inline description: ReaderDescription[T]): JsonReader[T] =
     ${ SemiautoDerivation.jsonReaderWithDescription[T]('description) }

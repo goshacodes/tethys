@@ -6,7 +6,6 @@ import tethys.commons.TokenNode.obj
 import tethys.commons.{Token, TokenNode}
 import tethys.readers.tokens.QueueIterator
 import tethys.writers.tokens.SimpleTokenWriter.SimpleTokenWriterOps
-import tethys.derivation.Defaults
 
 class DerivationSpec extends AnyFlatSpec with Matchers {
   def read[A: JsonReader](nodes: List[TokenNode]): A = {
@@ -127,5 +126,81 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
 
     read[WithArg[Int]](obj("x" -> 5)) shouldBe WithArg[Int](5)
     read[WithArg[String]](obj("x" -> 5, "y" -> "lool")) shouldBe WithArg[String](5, Some("lool"))
+  }
+
+  it should "write/read sum types with provided json discriminator" in {
+    enum Disc derives StringEnumJsonWriter, StringEnumJsonReader:
+      case A, B
+
+    sealed trait Choose(val discriminator: Disc) derives JsonObjectWriter, JsonReader
+
+    object Choose:
+      given JsonDiscriminator[Choose, Disc] = JsonDiscriminator.by(_.discriminator)
+
+      case class AA() extends Choose(Disc.A)
+      case class BB() extends Choose(Disc.B)
+      
+    (Choose.AA(): Choose).asTokenList shouldBe obj("discriminator" -> "A")
+    (Choose.BB(): Choose).asTokenList shouldBe obj("discriminator" -> "B")
+
+    read[Choose](obj("discriminator" -> "A")) shouldBe Choose.AA()
+    read[Choose](obj("discriminator" -> "B")) shouldBe Choose.BB()
+  }
+
+  it should "write/read sum types with provided json discriminator of simple type" in {
+    sealed trait Choose(val discriminator: Int) derives JsonObjectWriter, JsonReader
+
+    object Choose:
+      given JsonDiscriminator[Choose, Int] = JsonDiscriminator.by(_.discriminator)
+
+      case class AA() extends Choose(0)
+
+      case class BB() extends Choose(1)
+
+    (Choose.AA(): Choose).asTokenList shouldBe obj("discriminator" -> 0)
+    (Choose.BB(): Choose).asTokenList shouldBe obj("discriminator" -> 1)
+
+    read[Choose](obj("discriminator" -> 0)) shouldBe Choose.AA()
+    read[Choose](obj("discriminator" -> 1)) shouldBe Choose.BB()
+  }
+
+  it should "write/read json for generic discriminators" in {
+    enum Disc1 derives StringEnumJsonWriter, StringEnumJsonReader:
+      case A, B
+
+    enum Disc2 derives StringEnumJsonWriter, StringEnumJsonReader:
+      case AA, BB
+
+    sealed trait Choose[A](val discriminator: A) derives JsonWriter, JsonReader
+
+    object Choose:
+      given [A]: JsonDiscriminator[Choose[A], A] = JsonDiscriminator.by(_.discriminator)
+
+    case class ChooseA() extends Choose[Disc1](Disc1.A)
+    case class ChooseB() extends Choose[Disc2](Disc2.BB)
+
+    (ChooseA(): Choose[Disc1]).asTokenList shouldBe obj("discriminator" -> "A")
+    (ChooseB(): Choose[Disc2]).asTokenList shouldBe obj("discriminator" -> "BB")
+
+    read[Choose[Disc1]](obj("discriminator" -> "A")) shouldBe ChooseA()
+    read[Choose[Disc2]](obj("discriminator" -> "BB")) shouldBe ChooseB()
+  }
+
+  it should "not compile derivation when discriminator override found" in {
+
+    """
+      |
+      |    sealed trait Foo(val x: Int) derives JsonReader, JsonObjectWriter
+      |
+      |    object Foo:
+      |      given JsonDiscriminator[Foo, Int] = JsonDiscriminator.by(_.x)
+      |
+      |      case class Bar(override val x: Int) extends Foo(x)
+      |
+      |      case class Baz() extends Foo(0)
+      |
+      |""" shouldNot compile
+
+
   }
 }

@@ -1,10 +1,10 @@
 package tethys.derivation
 
-import tethys.{JsonObjectWriter, JsonWriter}
+import tethys.{JsonDiscriminator, JsonObjectWriter, JsonWriter}
 import tethys.writers.tokens.TokenWriter
 
 import scala.deriving.Mirror
-import scala.compiletime.{summonInline, erasedValue, summonFrom}
+import scala.compiletime.{erasedValue, summonFrom, summonInline, constValueTuple}
 
 private[tethys] trait JsonObjectWriterDerivation:
   inline def derived[A](using mirror: Mirror.Of[A]): JsonObjectWriter[A] =
@@ -21,8 +21,23 @@ private[tethys] trait JsonObjectWriterDerivation:
               }
 
           case m: Mirror.SumOf[A] =>
+            writeDiscriminatorIfProvided[A, m.MirroredElemTypes, m.MirroredElemLabels](value, tokenWriter)
+
             summonJsonWritersForSum[A, m.MirroredElemTypes](m.ordinal(value))
               .writeValues(value.asInstanceOf, tokenWriter)
+
+  private inline def writeDiscriminatorIfProvided[T, Elems <: Tuple, Labels <: Tuple](value: T, tokenWriter: TokenWriter): Unit =
+    summonFrom[JsonDiscriminator[T, _]] {
+      case discriminator: JsonDiscriminator[T, t] =>
+        summonInline[JsonWriter[t]]
+          .write(
+            name = Discriminator.getLabel[T, t],
+            value = discriminator.choose(value).asInstanceOf[t],
+            tokenWriter = tokenWriter
+          )
+
+      case _ =>
+    }
 
   private inline def summonJsonWritersForSum[T, Elems <: Tuple]: List[JsonObjectWriter[?]] =
     inline erasedValue[Elems] match
@@ -61,4 +76,4 @@ private[tethys] trait JsonObjectWriterDerivation:
       case _: Elem =>
         scala.compiletime.error("Recursive derivation is not possible")
       case value =>
-        JsonObjectWriter.derived[Elem](using summonInline[Mirror.Of[Elem]])
+        JsonWriter.derived[Elem](using summonInline[Mirror.Of[Elem]])
