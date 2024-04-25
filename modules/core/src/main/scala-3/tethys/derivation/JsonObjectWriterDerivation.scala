@@ -6,7 +6,7 @@ import tethys.writers.tokens.TokenWriter
 import scala.deriving.Mirror
 import scala.compiletime.{summonInline, erasedValue, summonFrom}
 
-private[tethys] trait JsonWriterDerivation:
+private[tethys] trait JsonObjectWriterDerivation:
   inline def derived[A](using mirror: Mirror.Of[A]): JsonObjectWriter[A] =
     new JsonObjectWriter[A]:
       override def writeValues(value: A, tokenWriter: TokenWriter): Unit =
@@ -61,4 +61,4 @@ private[tethys] trait JsonWriterDerivation:
       case _: Elem =>
         scala.compiletime.error("Recursive derivation is not possible")
       case value =>
-        JsonWriter.derived[Elem](using summonInline[Mirror.Of[Elem]])
+        JsonObjectWriter.derived[Elem](using summonInline[Mirror.Of[Elem]])

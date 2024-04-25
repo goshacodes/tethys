@@ -17,9 +17,9 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
   }
 
   it should "compile and correctly write and read product" in {
-    case class Person(id: Int, name: String, phone: Option[String], default: String = "") derives JsonWriter, JsonReader
+    case class Person(id: Int, name: String, phone: Option[String], default: String = "") derives JsonObjectWriter, JsonReader
 
-    case class Wrapper(person: Person) derives JsonWriter, JsonReader
+    case class Wrapper(person: Person) derives JsonObjectWriter, JsonReader
 
     Person(2, "Peter", None).asTokenList shouldBe obj(
       "id" -> 2,

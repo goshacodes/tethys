@@ -18,9 +18,9 @@ import scala.annotation.compileTimeOnly
 import scala.annotation.experimental
 
 trait SemiautoDerivation {
-  @deprecated("Use JsonObjectWriter.derived or JsonWriter.derived instead")
+  @deprecated("Use JsonObjectWriter.derived instead")
   inline def jsonWriter[T]: JsonObjectWriter[T] =
-    JsonWriter.derived[T](using scala.compiletime.summonInline[scala.deriving.Mirror.Of[T]])
+    JsonObjectWriter.derived[T](using scala.compiletime.summonInline[scala.deriving.Mirror.Of[T]])
 
   inline def jsonWriter[T](inline description: WriterDescription[T]): JsonObjectWriter[T] =
     ${ SemiautoDerivation.jsonWriterWithDescription[T]('description) }
