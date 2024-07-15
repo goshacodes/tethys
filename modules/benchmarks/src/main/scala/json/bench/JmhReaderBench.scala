@@ -15,10 +15,10 @@ import org.openjdk.jmh.annotations.{State, _}
 class JmhReaderBench {
   @Param(Array(
     "128b",
-    "1kb",
-    "128kb",
-    "1mb",
-    "32mb"
+    //"1kb",
+    //"128kb",
+    //"1mb",
+    //"32mb"
   ))
   var jsonSize: String = _
 
@@ -39,14 +39,7 @@ class JmhReaderBench {
   }
 
   @Param(Array(
-    "tethys-jackson",
-    "pure-jackson",
-    "circe-jawn",
-    "circe-jackson",
-    "json4s-jackson",
-    "json4s-native",
-    "play-json",
-    "spray-json"
+    "tethys-jackson"
   ))
   var processorName: String = _
 

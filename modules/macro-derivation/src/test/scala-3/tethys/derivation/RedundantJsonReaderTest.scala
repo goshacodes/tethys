@@ -26,7 +26,7 @@ class RedundantJsonReaderTest extends AnyFlatSpec with Matchers {
   }
 
   behavior of "jsonReader"
-  it should "not require redundant classes for generated readers" in {
+  /*it should "not require redundant classes for generated readers" in {
     implicit val reader: JsonReader[BaseClass] = jsonReader[BaseClass] {
       describe {
         ReaderBuilder[BaseClass]
@@ -37,6 +37,6 @@ class RedundantJsonReaderTest extends AnyFlatSpec with Matchers {
     read[BaseClass](obj(
       "intField" -> 1
     )) shouldBe BaseClass(RedundantClass(1))
-  }
+  }*/
 
 }

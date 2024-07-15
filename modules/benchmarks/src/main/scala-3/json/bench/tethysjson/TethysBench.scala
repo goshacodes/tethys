@@ -10,6 +10,8 @@ import tethys.jackson.*
   */
 object TethysBench {
 
+  implicit val seqIntReader: JsonReader[Seq[Int]] = JsonReader.iterableReader
+  implicit val mapIntReader: JsonReader[Map[String, Int]] = JsonReader.mapReader
   implicit val dataWriter: JsonWriter[Data] = JsonWriter.derived[Data]
   implicit val dataReader: JsonReader[Data] = JsonReader.derived[Data]
 

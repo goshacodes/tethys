@@ -117,7 +117,7 @@ class DerivationMacro(val quotes: Quotes) extends ConfigurationMacroUtils:
       }
 
   private def deriveMissingWriters[T: Type](tpes: List[TypeRepr]): List[ValDef] =
-    tpes.distinct.zipWithIndex
+    distinct(tpes).zipWithIndex
       .flatMap { (tpe, idx) =>
         tpe.asType match
           case '[t] =>
@@ -202,162 +202,181 @@ class DerivationMacro(val quotes: Quotes) extends ConfigurationMacroUtils:
     val fieldsWithoutReader = fields.collect { case (field: ReaderField.Extracted) if field.reader => field.name }
     val fieldNamesWithTypes = fields.flatMap(_.readerTypes(existingLabels)).distinctBy(_._1)
 
-    val sortedFields: List[(String, Int, Option[Expr[Any => Any]], List[(String, Option[Int])], Boolean)] =
+    case class ExpectedField(name: String)
+
+    val expectedFields = fields.flatMap {
+      case field: ReaderField.Basic =>
+        List((field.name, field.extractor.map(_._1).getOrElse(field.tpe), defaults.get(field.name)))
+      case field: ReaderField.Extracted =>
+        field.extractors.map((name, tpe) => (name, tpe, defaults.get(name)))
+    }.distinctBy(_._1)
+
+
+    val sortedFields: List[(String, TypeRepr, Option[(TypeRepr, Term)], List[(String, TypeRepr)], Boolean)] =
       fields.map {
         case field: ReaderField.Basic =>
-          (field.name, field.idx, field.extractor.map(_._2), Nil, false)
+          (field.name, field.tpe, field.extractor, Nil, false)
         case field: ReaderField.Extracted =>
-          (field.name, field.idx, Some(field.lambda), field.extractors.map((name, _) => (name -> labelsToIndices.get(name))), field.reader)
+          (field.name, field.tpe, Some((field.tpe, field.lambda)), field.extractors, field.reader)
       }
 
-   Block(
-      deriveMissingReaders(fieldNamesWithTypes.map(_._2)),
+    case class FieldRefs(name: String, ref: Ref, initialized: Ref, default: Option[Expr[Any]])
+
+    val (defaultStats, defaultsByName) = expectedFields.map { (name, tpe, defaultOpt) =>
+      val symbol = Symbol.newVal(Symbol.spliceOwner, s"${name}DefaultVar", tpe, Flags.EmptyFlags, Symbol.noSymbol)
+      val default = defaultOpt.getOrElse {
+        tpe.asType match
+          case '[Boolean] => '{false}
+          case '[Short] => '{0}
+          case '[Int] => '{0}
+          case '[Long] => '{0}
+          case '[Float] => '{0f}
+          case '[Double] => '{0.0}
+          case '[Byte] => '{0}
+          case '[Char] => '{0}
+          case _ => '{null}
+      }.asTerm
+      val valDef = ValDef(symbol, Some(default))
+      (valDef, (name, Ref(valDef.symbol)))
+    }.unzip
+
+    val (stats, refs) = expectedFields.map { (name, tpe, defaultOpt) =>
+      val symbol = Symbol.newVal(Symbol.spliceOwner, s"${name}Var", tpe, Flags.Mutable, Symbol.noSymbol)
+      val initSymbol = Symbol.newVal(Symbol.spliceOwner, s"${name}Init", TypeRepr.of[Boolean], Flags.Mutable, Symbol.noSymbol)
+      val stat = ValDef(symbol, Some(defaultsByName.find(_._1 == name).get._2))
+      val initStat = ValDef(initSymbol, Some('{false}.asTerm))
+      (List(stat, initStat), FieldRefs(name, Ref(stat.symbol), Ref(initStat.symbol), defaultOpt))
+    }.unzip
+
+    val fieldRefs = refs.map(it => it.name -> it).toMap
+
+    def initialize(name: String, value: Term): Expr[Unit] =
+      val ref = fieldRefs(name).ref
+      val init = fieldRefs(name).initialized
+      '{
+        ${ Assign(ref, value).asExprOf[Unit] }
+        ${ Assign(init, '{ true }.asTerm).asExprOf[Unit] }
+      }
+
+    def failIfNotInitialized(fieldName: Expr[FieldName]): Expr[Unit] =
+      refs.filterNot(_.default.nonEmpty) match
+        case refs @ head :: tail =>
+          val boolExpr = tail.foldLeft('{!${head.initialized.asExprOf[Boolean]}}) { (acc, el) =>
+            '{${acc} || !${el.initialized.asExprOf[Boolean]}}
+          }
+          '{
+            if {$boolExpr} then
+              val uninitializedFields = new scala.collection.mutable.ArrayBuffer[String](${ Expr(refs.size) })
+              ${
+                Expr.block(
+                  refs.map { ref =>
+                    '{
+                      if !${ref.initialized.asExprOf[Boolean]} then
+                        uninitializedFields += ${Expr(ref.name)}
+                    }
+                  },
+                '{}
+                )
+              }
+              ReaderError.wrongJson("Can not extract fields from json: " + uninitializedFields.mkString(", "))(${fieldName})
+          }
+
+        case Nil =>
+          '{}
+
+    def newInstance(args: List[Term]): Expr[T] =
+      New(TypeTree.of[T])
+        .select(tpe.classSymbol.get.primaryConstructor)
+        .appliedToArgs(args)
+        .asExprOf[T]
+
+
+    val term = Block(
+      deriveMissingReaders(fieldNamesWithTypes.map(_._2)) ++ defaultStats,
       '{
         new JsonReader[T]:
           given JsonReader[T] = this
 
-          def read(it: TokenIterator)(implicit fieldName: FieldName) =
+          def read(it: TokenIterator)(using fieldName: FieldName) =
             if !it.currentToken().isObjectStart then
               ReaderError.wrongJson("Expected object start but found: " + it.currentToken().toString)
-
-            it.nextToken()
-            val collectedValues: mutable.Map[String, Any] = ${
-              if defaults.isEmpty then
-                '{ mutable.Map.empty }
-              else
-                '{
-                  val fallback = ${ defaults.exprOfMap[String, Any] }
-                  mutable.Map.empty.withDefault(fallback)
-                }
-            }
-
-            val missingFields: mutable.Set[String] = ${ requiredLabels.exprOfMutableSet }
-            val resultFields = mutable.Map.empty[Int, Any]
-            lazy val fieldsForExtractedReader = mutable.Map.empty[String, TokenIterator]
-            lazy val fieldsWithoutReaders: mutable.Set[String] = ${ fieldsWithoutReader.exprOfMutableSet }
-            while (!it.currentToken().isObjectEnd)
-              val jsonName = it.fieldName()
+            else
               it.nextToken()
-              val currentIt = it.collectExpression()
 
               ${
-                Match(
-                  '{jsonName}.asTerm,
-                  fieldNamesWithTypes.map { (name, tpe) =>
-                    tpe.asType match {
-                      case '[t] =>
-                        CaseDef(
-                          Literal(StringConstant(name)),
-                          None,
-                          '{
-                            collectedValues += ${Expr(name)} -> summonInline[JsonReader[t]]
-                              .read(currentIt.copy())(fieldName.appendFieldName(${Expr(name)}))
-                            missingFields -= ${Expr(name)}
-                            ()
-                          }.asTerm
+                Block(
+                  stats.flatten,
+                  '{
+                    while (!it.currentToken().isObjectEnd)
+                      val jsonName = it.fieldName()
+                      it.nextToken()
+                      val currentIt = it.collectExpression()
+
+                      given FieldName = fieldName.appendFieldName(jsonName)
+
+                      ${
+                        Match(
+                          '{ jsonName }.asTerm,
+                          fieldNamesWithTypes.map { (name, tpe) =>
+                            tpe.asType match {
+                              case '[t] =>
+                                CaseDef(
+                                  Literal(StringConstant(name)),
+                                  None,
+                                  initialize(name, '{ ${lookup[JsonReader[t]]}.read(currentIt.copy()) }.asTerm).asTerm
+                                )
+                            }
+                          } :+
+                            CaseDef(
+                              Wildcard(),
+                              None,
+                              '{it.skipExpression(); ()}.asTerm
+                            )
+                        ).asExprOf[Unit]
+                      }
+
+                    it.nextToken()
+
+                    ${ failIfNotInitialized('{fieldName}) }
+
+                    ${
+                      newInstance(
+                        sortedFields.map { (name, tpe, fun, deps, _) =>
+                          tpe.asType match {
+                            case '[typ] =>
+                              (fun, deps) match {
+                                case (Some((fromTpe, fun)), Nil) =>
+                                  fromTpe.asType match
+                                    case '[fromTyp] =>
+                                      '{ ${ fun.asExprOf[fromTyp => typ] }.apply(${ fieldRefs(name).ref.asExprOf[fromTyp] }) }
+
+                                case (None, Nil) =>
+                                  fieldRefs(name).ref.asExprOf[typ]
+
+                                case (Some((_, fun)), List(depName)) =>
+                                  '{ ${ fun.asExprOf[Any => Any] }.apply(${ fieldRefs(name).ref.asExprOf[Any] }) }
+
+                                case (Some(fun), deps) =>
+                                  report.errorAndAbort("Internal error, function not provided for dependency")
+
+                                case (None, _) =>
+                                  report.errorAndAbort("Internal error, function not provided for dependency")
+                              }
+                          }
+                        }.map(_.asTerm)
+
                         )
                     }
-                  } :+ {
-                    def ifFoundFieldForReader: Expr[Unit] = '{
-                      fieldsForExtractedReader.update(jsonName, currentIt)
-                      missingFields -= jsonName
-                      fieldsWithoutReaders -= jsonName
-                      ()
-                    }
 
-                    def ifUnknownFieldWhileStrict: Expr[Unit] = '{
-                      val expectedNames = (collectedValues.keySet ++ missingFields ++ ${ defaults.keySet.exprOfSet }).mkString("'", "', '", "'")
-                      ReaderError.wrongJson(s"unexpected field '$jsonName', expected one of $expectedNames")
-                      ()
-                    }
-                    CaseDef(
-                      Wildcard(),
-                      None,
-                      if fieldsWithoutReader.nonEmpty && isStrict then
-                        '{
-                          if fieldsWithoutReaders.contains(jsonName) then ${ifFoundFieldForReader}
-                          else if ${ Expr(isStrict) } then ${ifUnknownFieldWhileStrict}
-                        }.asTerm
-                      else if fieldsWithoutReader.nonEmpty && !isStrict then
-                        '{ if fieldsWithoutReaders.contains(jsonName) then ${ ifFoundFieldForReader } else ()}.asTerm
-                      else if fieldsWithoutReader.isEmpty && isStrict then
-                        ifUnknownFieldWhileStrict.asTerm
-                      else '{}.asTerm
-                    )
-                  }
-                ).asExprOf[Unit]
+                  }.asTerm
+                ).asExprOf[T]
               }
 
-            it.nextToken()
+        }.asTerm
+    )
 
-            if (missingFields.nonEmpty)
-              ReaderError.wrongJson("Can not extract fields from json: " + missingFields.mkString(", "))
-
-            ${
-              Expr.block(
-                sortedFields.map { (name, idx, function, dependencies, extractReader) =>
-                  dependencies match
-                    case Nil =>
-                      '{ resultFields += Tuple2(${Expr(idx)}, ${
-                        function match
-                          case Some(buildField) =>
-                            '{ ${buildField}.asInstanceOf[Any => Any].apply(collectedValues(${ Expr(name) })) }
-                          case None =>
-                            '{ collectedValues(${ Expr(name) }) }
-                      }) }
-
-                    case dependencies =>
-                      def fieldsToBuildFrom(depName: String, depIdx: Option[Int]): Expr[Any] =
-                        depIdx.fold('{ collectedValues(${ Expr(depName) }) })(idx => '{ resultFields(${ Expr(idx) }) })
-
-                      val value = (function, dependencies) match
-                        case (None, _) =>
-                          report.errorAndAbort("Internal error, function not provided for dependency")
-
-                        case (Some(buildField), List((depName, depIdxOpt))) =>
-                          '{ ${ buildField }.apply(${fieldsToBuildFrom(depName, depIdxOpt)}) }
-
-                        case (Some(buildField), dependencies) =>
-                          '{ ${ buildField }.apply(Tuple.fromArray(Array(${ Varargs(dependencies.map(fieldsToBuildFrom)) }: _*))) }
-
-                      if (!extractReader)
-                        '{ resultFields += ${Expr(idx)} -> ${ value } }
-                      else
-                        '{
-                          val read: TokenIterator => Any = ${value}.asInstanceOf[JsonReader[Any]].read(_)(fieldName.appendFieldName(${Expr(name)}))
-                          fieldsForExtractedReader.get(${Expr(name)}) match
-                            case Some(iterator) =>
-                              resultFields += ${Expr(idx)} -> read(iterator)
-                            case _ =>
-                              try
-                                resultFields += ${Expr(idx)} -> read(QueueIterator(List(TokenNode.NullValueNode)))
-                                fieldsWithoutReaders -= ${Expr(name)}
-                              catch
-                                case _: ReaderError =>
-                        }
-                },
-                '{}
-              )
-            }
-
-            ${ if (fieldsWithoutReader.nonEmpty)
-              '{
-                if (fieldsWithoutReaders.nonEmpty)
-                  ReaderError.wrongJson("Can not extract fields from json: " + fieldsWithoutReaders.mkString(", "))
-              }
-              else '{}
-            }
-
-            summonInline[scala.deriving.Mirror.ProductOf[T]].fromProduct:
-              new Product:
-                def productArity = resultFields.size
-                def productElement(n: Int) = resultFields(n)
-                def canEqual(that: Any) = that match
-                  case that: Product if that.productArity == productArity => true
-                  case _ => false
-      }.asTerm
-    ).asExprOf[JsonReader[T]]
-
+    println(term.show(using Printer.TreeAnsiCode))
+    term.asExprOf[JsonReader[T]]
 
   def deriveJsonReaderForSum[T: Type](config: Expr[JsonConfig[T]]): Expr[JsonReader[T]] =
     val tpe = TypeRepr.of[T]
@@ -404,32 +423,27 @@ class DerivationMacro(val quotes: Quotes) extends ConfigurationMacroUtils:
       case None =>
         report.errorAndAbort("Discriminator is required to derive JsonReader for sum type. Use JsonConfig[T].discriminateBy(_.field)")
 
-
-  private def deriveMissingReaders(tpes: List[TypeRepr]): List[ValDef] =
-    tpes.distinct.zipWithIndex.flatMap { (tpe, idx) =>
-      tpe.asType match
-        case '[t] =>
-          lookupOpt[JsonReader[t]] match
-            case Some(reader) =>
-              None
-            case None =>
-              Some(
-                ValDef(
-                  Symbol.newVal(
-                    Symbol.spliceOwner,
-                    s"given_jsonReader_$idx",
-                    TypeRepr.of[JsonReader[t]],
-                    Flags.Given,
-                    Symbol.noSymbol
-                  ),
-                  Some('{ JsonReader.derived[t](using ${ lookup[scala.deriving.Mirror.Of[t]] }) }.asTerm)
-                )
-              )
+  private def distinct(tpes: List[TypeRepr]) =
+    tpes.foldLeft(List.empty[TypeRepr]) { (acc, tpe) =>
+      if (acc.exists(_ =:= tpe)) acc
+      else tpe :: acc
     }
 
-
-
-
-
-
-
+  private def deriveMissingReaders(tpes: List[TypeRepr]): List[ValDef] =
+    distinct(tpes).zipWithIndex
+      .flatMap { (tpe, idx) =>
+        tpe.asType match
+          case '[t] =>
+            Some(
+              ValDef(
+                Symbol.newVal(
+                  Symbol.spliceOwner,
+                  s"given_jsonReader_$idx",
+                  TypeRepr.of[JsonReader[t]],
+                  Flags.Given | Flags.Lazy | Flags.Implicit,
+                  Symbol.noSymbol
+                ),
+                Some(lookupOpt[JsonReader[t]].getOrElse('{ JsonReader.derived[t](using ${ lookup[scala.deriving.Mirror.Of[t]] }) }).asTerm)
+              )
+            )
+    }

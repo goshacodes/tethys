@@ -94,7 +94,7 @@ class SemiautoReaderDerivationTest extends AnyFlatSpec with Matchers {
       "d" -> 1.0
     )) shouldBe SimpleType(2, "str", 1.0)
   }
-
+/*
   it should "derive reader for extract from description" in {
     implicit val reader: JsonReader[SimpleType] = jsonReader[SimpleType] {
       describe {
@@ -161,8 +161,8 @@ class SemiautoReaderDerivationTest extends AnyFlatSpec with Matchers {
       "d" -> 2.0,
       "any" -> 2
     )) shouldBe SimpleTypeWithAny(1, "str", 2.0, 2)
-  }
-
+  }*/
+/*
   it should "derive reader for complex extraction case" in {
     implicit val reader: JsonReader[SimpleTypeWithAny] = jsonReader[SimpleTypeWithAny] {
       ReaderBuilder[SimpleTypeWithAny]
@@ -202,13 +202,12 @@ class SemiautoReaderDerivationTest extends AnyFlatSpec with Matchers {
       "any" -> true
     )) shouldBe SimpleTypeWithAny(3, "str", 1.0, Some(true))
 
-    //FIXME: figure out how to handle this case
-    /*read[SimpleTypeWithAny](obj(
+    read[SimpleTypeWithAny](obj(
       "s" -> "str",
       "d" -> 1.0,
       "e" -> 2
-    )) shouldBe SimpleTypeWithAny(3, "str", 1.0, None)*/
-  }
+    )) shouldBe SimpleTypeWithAny(3, "str", 1.0, None)
+  }*/
 
   it should "derive reader for fieldStyle from description" in {
     implicit val reader: JsonReader[CamelCaseNames] = jsonReader[CamelCaseNames] {

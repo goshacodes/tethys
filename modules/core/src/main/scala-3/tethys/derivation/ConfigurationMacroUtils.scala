@@ -24,7 +24,7 @@ private[derivation] inline def searchJsonReader[Field]: JsonReader[Field] =
   scala.compiletime.summonFrom[JsonReader[Field]] {
     case reader: JsonReader[Field] => reader
     case _ => scala.compiletime.error("JsonReader not found")
-  }
+  } 
 
 
 
@@ -51,6 +51,13 @@ trait ConfigurationMacroUtils:
     Implicits.search(TypeRepr.of[JsonWriter[T]]) match
       case success: ImplicitSearchSuccess =>
         success.tree.asExprOf[JsonWriter[T]]
+      case failure: ImplicitSearchFailure =>
+        report.errorAndAbort(failure.explanation)
+
+  def lookupJsonReader[T: Type]: Expr[JsonReader[T]] =
+    Implicits.search(TypeRepr.of[JsonReader[T]]) match
+      case success: ImplicitSearchSuccess =>
+        success.tree.asExprOf[JsonReader[T]]
       case failure: ImplicitSearchFailure =>
         report.errorAndAbort(failure.explanation)
 
@@ -528,15 +535,14 @@ trait ConfigurationMacroUtils:
             } =>
           if acc.extracted.contains(field.name) then
             exitExtractionAlreadyDefined(field.name)
-          val lambda =
-            Typed(fun.asTerm, TypeTree.of[Any => Any]).asExprOf[Any => Any]
+            
           loop(
             config = rest,
             acc = acc.withExtracted(
               ReaderField.Basic(
                 name = field.name,
-                tpe = TypeRepr.of[t1],
-                extractor = Some((TypeRepr.of[t1], lambda)),
+                tpe = TypeRepr.of[t],
+                extractor = Some((TypeRepr.of[t1], Typed(fun.asTerm, TypeTree.of[t1 => t]))),
                 default = Option.when(TypeRepr.of[t1].isOption)('{ None })
               )
             )
@@ -557,7 +563,7 @@ trait ConfigurationMacroUtils:
           def loopInner(
               term: Term,
               extractors: List[(String, TypeRepr)] = Nil,
-              lambda: Expr[Any => Any] = '{ identity[Any] }
+              lambda: Term = '{ identity[Any] }.asTerm
           ): ReaderBuilderMacroConfig =
             term match
               case config @ Apply(
@@ -600,22 +606,15 @@ trait ConfigurationMacroUtils:
                 loopInner(
                   term = term,
                   extractors = Nil,
-                  lambda = '{
-                    ${ lambda.asExprOf[Any] }.asInstanceOf[Any => Any]
-                  }
+                  lambda = lambda
                 )
               case Apply(Apply(Select(term, "product"), List(mirror)), _) =>
                 loopInner(
                   term = term,
                   extractors = Nil,
-                  lambda = '{
-                    ${
-                      Select
-                        .unique(mirror, "fromProduct")
-                        .etaExpand(Symbol.spliceOwner)
-                        .asExprOf[Any]
-                    }.asInstanceOf[Any => Any]
-                  }
+                  lambda = Select
+                    .unique(mirror, "fromProduct")
+                    .etaExpand(Symbol.spliceOwner)
                 )
               case Apply(
                     TypeApply(Select(term, "from" | "and"), List(tpt)),
@@ -876,7 +875,7 @@ trait ConfigurationMacroUtils:
         case field: ReaderField.Basic =>
           field.default.map(field.name -> _).toList
         case field: ReaderField.Extracted =>
-          field.default.map(field.name -> _).toList :::
+          //field.default.map(field.name -> _).toList :::
             field.extractors
               .collect {
                 case (name, tpe) if !existingFields(name) && tpe.isOption =>
@@ -895,7 +894,7 @@ trait ConfigurationMacroUtils:
     def readerTypes(existingFields: Set[String]): List[(String, TypeRepr)] =
       this match
         case ReaderField.Basic(name, tpe, extractor, idx, default) =>
-          List(name -> tpe)
+          List(name -> extractor.map(_._1).getOrElse(tpe))
         case ReaderField.Extracted(
               name,
               tpe,
@@ -916,7 +915,7 @@ trait ConfigurationMacroUtils:
     case class Basic(
         name: String,
         tpe: TypeRepr,
-        extractor: Option[(TypeRepr, Expr[Any => Any])],
+        extractor: Option[(TypeRepr, Term)],
         idx: Int = 0,
         default: Option[Expr[Any]] = None
     ) extends ReaderField
@@ -925,7 +924,7 @@ trait ConfigurationMacroUtils:
         name: String,
         tpe: TypeRepr,
         extractors: List[(String, TypeRepr)],
-        lambda: Expr[Any => Any],
+        lambda: Term,
         reader: Boolean,
         idx: Int = 0,
         default: Option[Expr[Any]] = None

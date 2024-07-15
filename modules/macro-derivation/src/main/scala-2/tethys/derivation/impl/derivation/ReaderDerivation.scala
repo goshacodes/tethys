@@ -94,7 +94,7 @@ trait ReaderDerivation
 
     val name = TermName(c.freshName("name"))
 
-    c.Expr[JsonReader[A]] {
+    val reader = c.Expr[JsonReader[A]] {
       c.untypecheck {
         q"""
            new $jsonReaderType[$tpe] {
@@ -129,6 +129,9 @@ trait ReaderDerivation
         """
       }
     }
+
+    println(show(reader.tree))
+    reader
   }
 
   private def applyFieldStyle(fieldStyle: Option[FieldStyle]): List[SimpleField] => List[SimpleField] = readerFields => {
