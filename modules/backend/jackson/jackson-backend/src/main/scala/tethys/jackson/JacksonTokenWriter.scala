@@ -3,7 +3,7 @@ package tethys.jackson
 import com.fasterxml.jackson.core.JsonGenerator
 import tethys.writers.tokens.TokenWriter
 
-class JacksonTokenWriter(jsonGenerator: JsonGenerator) extends TokenWriter with TokenWriter.Flushing {
+class JacksonTokenWriter(jsonGenerator: JsonGenerator) extends TokenWriter {
   override def writeArrayStart(): JacksonTokenWriter.this.type = {
     jsonGenerator.writeStartArray()
     this
@@ -92,4 +92,7 @@ class JacksonTokenWriter(jsonGenerator: JsonGenerator) extends TokenWriter with 
   override def close(): Unit = jsonGenerator.close()
 
   override def flush(): Unit = jsonGenerator.flush()
+
+  override def result(): String =
+    jsonGenerator.getOutputTarget.toString
 }

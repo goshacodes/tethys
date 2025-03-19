@@ -7,7 +7,7 @@ import tethys.readers.tokens.TokenIteratorProducer
 
 import scala.collection.mutable
 
-class SimpleTokenWriter extends TokenWriter with TokenWriter.Flushing {
+class SimpleTokenWriter extends TokenWriter {
   val tokens: mutable.ArrayBuffer[TokenNode] = mutable.ArrayBuffer.empty
 
   override def writeArrayStart(): SimpleTokenWriter.this.type = append(
@@ -93,6 +93,9 @@ class SimpleTokenWriter extends TokenWriter with TokenWriter.Flushing {
       this
     }
   }
+
+  override def result(): String =
+    throw new UnsupportedOperationException("SimpleTokenWriter.outString")
 }
 
 object SimpleTokenWriter {
