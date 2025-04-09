@@ -39,10 +39,4 @@ object JsonObjectWriter
   ): JsonObjectWriter[A] = jsonObjectWriter
 }
 
-private[tethys] trait LowPriorityJsonObjectWriters {
-  implicit final def lowPriorityWriter[A](implicit
-      lowPriorityInstance: LowPriorityInstance[JsonObjectWriter[A]]
-  ): JsonObjectWriter[A] = {
-    lowPriorityInstance.instance
-  }
-}
+private[tethys] trait LowPriorityJsonObjectWriters {}

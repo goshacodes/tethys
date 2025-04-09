@@ -20,12 +20,43 @@ trait ConfigurationMacroUtils:
   val quotes: Quotes
   import quotes.reflect.*
 
+  def isRecursiveTpe(tpe: TypeRepr, childs: Option[List[TypeRepr]] = None): Boolean =
+    def childrenOf(tpe: TypeRepr): List[TypeRepr] =
+      tpe.asType match
+        case '[t] =>
+          Expr.summon[Mirror.Of[t]] match
+            case Some('{ $m: Mirror.Of[t] { type MirroredElemTypes = subs }}) =>
+              typeReprsOf[subs]
+            case _ =>
+              Nil
+
+    childs match {
+      case None =>
+         isRecursiveTpe(tpe, Some(childrenOf(tpe)))
+      case Some(Nil) =>
+        false
+      case Some(childs) =>
+        childs.exists(isRecursive(tpe, _)) || isRecursiveTpe(tpe, Some(childs.flatMap(childrenOf)))
+    }
+
+  
+  def extractUnionTypes(tpe: TypeRepr): List[TypeRepr] =
+    val work = mutable.Queue(tpe)
+    val types = mutable.ListBuffer.empty[TypeRepr]
+    
+    while (work.nonEmpty)
+      work.dequeue() match
+        case OrType(left, right) => work.enqueue(left, right)
+        case other => types.append(other)
+
+    types.toList
+
   def lookup[T: Type]: Expr[T] =
     Implicits.search(TypeRepr.of[T]) match
       case success: ImplicitSearchSuccess =>
         success.tree.asExprOf[T]
       case failure: ImplicitSearchFailure =>
-        // Not sees statements put in a block (e.g. derived instances)
+        // Not sees statements put in a Block (e.g. derived instances)
         // So we use summonInline
         '{ summonInline[T] }
 
@@ -816,7 +847,7 @@ trait ConfigurationMacroUtils:
             DiscriminatorConfig(
               symbol.name,
               tpe.memberType(symbol),
-              discriminators
+              Some(discriminators)
             )
           )
         )
@@ -859,22 +890,34 @@ trait ConfigurationMacroUtils:
       case Block(List(ValDef(_, _, Some(term))), _) => traverseTree(term)
       case Block(_, term)                           => traverseTree(term)
       case term                                     => term
+  
+  def isRecursive(tpe: TypeRepr, childTpe: TypeRepr): Boolean =
+    tpe =:= childTpe || (childTpe match
+      case AppliedType(_, types) => types.exists(isRecursive(tpe, _))
+      case _                     => false
+    )
 
   private def typeReprsOf[Ts: Type]: List[TypeRepr] =
     Type.of[Ts] match
       case '[EmptyTuple] => Nil
       case '[t *: ts]    => TypeRepr.of[t] :: typeReprsOf[ts]
 
+  def getDirectChildren(tpe: TypeRepr): List[TypeRepr] =
+    tpe.asType match
+      case '[t] =>
+        Expr.summon[Mirror.SumOf[t]] match
+          case Some('{ $m: Mirror.SumOf[t] { type MirroredElemTypes = subs }}) =>
+            typeReprsOf[subs]
+          case _ =>
+            Nil
+
   def getAllChildren(tpe: TypeRepr): List[TypeRepr] =
     def loop(tpe: TypeRepr): List[TypeRepr] =
       tpe.asType match
         case '[t] =>
-          Expr.summon[scala.deriving.Mirror.Of[t]] match
-            case Some('{
-                  $m: scala.deriving.Mirror.SumOf[t] {
-                    type MirroredElemTypes = subs
-                  }
-                }) =>
+          Expr.summon[Mirror.Of[t]] match
+            case Some('{ $m: Mirror.SumOf[t] { type MirroredElemTypes = subs }
+}) =>
               typeReprsOf[subs].flatMap(loop)
             case _ =>
               List(tpe)
@@ -907,24 +950,31 @@ trait ConfigurationMacroUtils:
       case Some(WriterField.Update(lambda, WriterField.Update.What.Root)) =>
         (tpe.asType, root.tpe.asType) match
           case ('[t1], '[t2]) =>
-            '{
+            val res = '{
               ${ lambda.asExprOf[t2 => t1] }.apply(${ root.asExprOf[t2] })
             }.asTerm
+            Term.betaReduce(res).getOrElse(res)
 
       case Some(WriterField.Update(lambda, WriterField.Update.What.Field)) =>
         val field = Select.unique(root, name)
-        (tpe.asType, field.tpe.asType) match
-          case ('[finalType], '[fieldType]) =>
-            '{
-              ${ lambda.asExprOf[fieldType => finalType] }.apply(${
-                field.asExprOf[fieldType]
-              })
-            }.asTerm
+        lambda match
+          case Lambda(List(ValDef(proxyName, _, _)), term) => // removes created proxy nodes for builder updates
+            val treeMapper = new TreeMap {
+              override def transformTerm(tree: Term)(ctx: Symbol): Term =
+                tree match
+                  case Ident(name) if name == proxyName => field
+                  case _ => super.transformTerm(tree)(ctx)
+             }
+            treeMapper.transformTerm(term)(Symbol.spliceOwner)
+          case other =>
+            other
 
     def label: Expr[String]
   }
 
   end WriterField
+
+  
 
   object WriterField:
     case class Basic(
@@ -1184,7 +1234,7 @@ trait ConfigurationMacroUtils:
   case class DiscriminatorConfig(
       label: String,
       tpe: TypeRepr,
-      values: List[Term]
+      values: Option[List[Term]]
   )
 
   extension (tpe: TypeRepr)
@@ -1447,4 +1497,4 @@ trait ConfigurationMacroUtils:
           s"Unknown tree: ${other.asTerm.show(using Printer.TreeShortCode)}"
         )
 
-    DiscriminatorConfig(name, TypeRepr.of[String], Nil)
+    DiscriminatorConfig(name, TypeRepr.of[String], None)

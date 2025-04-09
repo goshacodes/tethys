@@ -19,7 +19,7 @@ private[tethys] trait JsonObjectWriterDerivation:
   inline def derived[A](inline config: WriterBuilder[A])(using
       mirror: Mirror.ProductOf[A]
   ) =
-    Derivation.deriveJsonWriterForProduct[A](config, JsonConfiguration.default)
+    Derivation.deriveJsonWriterForProduct[A](config)
 
   @deprecated("Use WriterBuilder instead")
   inline def derived[A](inline config: WriterDerivationConfig)(using
@@ -40,12 +40,6 @@ private[tethys] trait JsonObjectWriterDerivation:
             case config: WriterBuilder[A] =>
               config
             case _ => WriterBuilder[A]
-          },
-          summonFrom[JsonConfiguration] {
-            case jsonConfig: JsonConfiguration =>
-              jsonConfig
-            case _ => JsonConfiguration.default
-
           }
         )
 

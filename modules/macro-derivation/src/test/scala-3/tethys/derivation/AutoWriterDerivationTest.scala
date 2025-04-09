@@ -5,7 +5,6 @@ import org.scalatest.flatspec.AnyFlatSpec
 import tethys.commons.TokenNode
 import tethys.commons.TokenNode._
 import tethys.derivation.ADTWithType._
-import tethys.derivation.auto._
 import tethys.derivation.semiauto._
 import tethys.writers.instances.SimpleJsonObjectWriter
 import tethys.writers.tokens.SimpleTokenWriter._
@@ -14,7 +13,9 @@ import tethys.{JsonObjectWriter, JsonWriter}
 class AutoWriterDerivationTest extends AnyFlatSpec with Matchers {
 
   behavior of "auto derivation"
+
   it should "auto derive writer for simple classes tree" in {
+    given JsonWriter[JsonTreeTestData] = JsonWriter.derived[JsonTreeTestData]
     JsonTreeTestData(a = 5, b = false, c = C(D(1))).asTokenList shouldBe obj(
       "a" -> 5,
       "b" -> false,
@@ -27,6 +28,8 @@ class AutoWriterDerivationTest extends AnyFlatSpec with Matchers {
   }
 
   it should "auto derive writers for a lot of embedded classes" in {
+    given [A: JsonWriter]: JsonWriter[Seq[A]] = JsonWriter.stringWriter.contramap(_.toString)
+    given JsonWriter[SeqMaster1] = JsonWriter.derived[SeqMaster1]
     Seq(
       SeqMaster1(Seq(SeqMaster2(Seq(SeqMaster3(Seq(SeqMaster4(Seq(1))))))))
     ).asTokenList shouldBe arr(
@@ -56,6 +59,8 @@ class AutoWriterDerivationTest extends AnyFlatSpec with Matchers {
           case _: ADTWithTypeA[B] => "ADTWithTypeA"
           case _: ADTWithTypeB[B] => "ADTWithTypeB"
         }
+      given [A: JsonWriter]: JsonObjectWriter[ADTWithType.ADTWithTypeB[A]] = JsonWriter.derived[ADTWithType.ADTWithTypeB[A]]
+
       simpleJsonObjectWriter ++ jsonWriter[ADTWithType[B]]
     }
 

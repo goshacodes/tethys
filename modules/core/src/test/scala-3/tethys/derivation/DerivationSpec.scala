@@ -229,6 +229,7 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
 
   it should "derive reader for recursive type" in {
     given JsonReader[RecursiveType] = JsonReader.derived[RecursiveType]
+    given JsonWriter[RecursiveType] = JsonWriter.derived[RecursiveType]
 
     read[RecursiveType](
       obj(
