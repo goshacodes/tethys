@@ -847,7 +847,7 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
     inline given JsonConfiguration = JsonConfiguration.default
       .fieldStyle(FieldStyle.LowerSnakeCase)
 
-    case class Inner(innerField: String)
+    case class Inner(innerField: String) derives JsonWriter, JsonReader
     case class Outer(outerField: Inner) derives JsonWriter, JsonReader
 
     val model = Outer(Inner("foo"))
@@ -888,7 +888,7 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
     inline given JsonConfiguration =
       JsonConfiguration.default.fieldStyle(FieldStyle.LowerSnakeCase)
 
-    case class Inner(innerField: String)
+    case class Inner(innerField: String) derives JsonWriter, JsonReader
     case class Outer(outerField: Inner) derives JsonWriter, JsonReader
 
     val model = Outer(Inner("foo"))

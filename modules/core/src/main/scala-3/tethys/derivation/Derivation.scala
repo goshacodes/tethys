@@ -1,9 +1,6 @@
 package tethys.derivation
 
-import tethys.derivation.builder.{
-  ReaderDerivationConfig,
-  WriterDerivationConfig
-}
+import tethys.derivation.builder.{ReaderDerivationConfig, WriterDerivationConfig}
 import tethys.writers.tokens.TokenWriter
 import tethys.readers.{FieldName, ReaderError}
 import tethys.readers.tokens.TokenIterator
@@ -25,32 +22,34 @@ import tethys.writers.instances.AllJsonWriters
 
 private[tethys] object Derivation:
 
-  inline def deriveJsonWriterForProduct[T](
-      inline config: WriterBuilder[T]
-  ): JsonObjectWriter[T] =
-    ${
-      DerivationMacro
-        .deriveJsonWriterForProduct[T]('{ config })
-    }
+  inline def writeProductTokens[T](
+      inline config: WriterBuilder[T],
+      value: T,
+      out: TokenWriter
+  ): Unit =
+    ${ DerivationMacro.writeProductTokens[T]('config, 'value, 'out) }
 
-  inline def deriveJsonWriterForSum[T]: JsonObjectWriter[T] =
-    ${ DerivationMacro.deriveJsonWriterForSum[T] }
-
-  
-  @deprecated
-  inline def deriveJsonWriterForProductLegacy[T](
-      inline config: WriterDerivationConfig
-  )(using mirror: Mirror.ProductOf[T]): JsonObjectWriter[T] =
-    ${
-      DerivationMacro
-        .deriveJsonWriterForProductLegacy[T]('{ config }, '{ mirror })
-    }
+  inline def writeSumTokens[T](value: T, out: TokenWriter): Unit =
+    ${ DerivationMacro.writeSumTokens[T]('value, 'out) }
 
   @deprecated
-  inline def deriveJsonWriterForSumLegacy[T](
-      inline config: WriterDerivationConfig
-  ): JsonObjectWriter[T] =
-    ${ DerivationMacro.deriveJsonWriterForSumLegacy[T]('{ config }) }
+  inline def writeProductTokensLegacy[T](
+      inline config: WriterDerivationConfig,
+      value: T,
+      out: TokenWriter
+  )(using mirror: Mirror.ProductOf[T]): Unit =
+    ${
+      DerivationMacro
+        .writeProductTokensLegacy[T]('config, 'mirror, 'value, 'out)
+    }
+
+  @deprecated
+  inline def writeSumTokensLegacy[T](
+      inline config: WriterDerivationConfig,
+      value: T,
+      out: TokenWriter
+  ): Unit =
+    ${ DerivationMacro.writeSumTokensLegacy[T]('config, 'value, 'out) }
 
   inline def deriveJsonReaderForSum[T]: JsonReader[T] =
     ${ DerivationMacro.deriveJsonReaderForSum[T] }
@@ -74,34 +73,53 @@ private[tethys] object Derivation:
     }
 
 object DerivationMacro:
-  def deriveJsonWriterForProduct[T: Type](
-      config: Expr[WriterBuilder[T]]
+  def writeProductTokens[T: Type](
+      config: Expr[WriterBuilder[T]],
+      value: Expr[T],
+      out: Expr[TokenWriter]
   )(using
       ctx: Quotes
-  ): Expr[JsonObjectWriter[T]] =
-    new JsonWriterDerivationMacro { val quotes = ctx }.deriveJsonWriterForProduct[T](config)
+  ): Expr[Unit] =
+    new JsonWriterDerivationMacro { val quotes = ctx }
+      .tokenize[T](value, Some(config), out, None)
 
-  def deriveJsonWriterForSum[T: Type](using
+  def writeSumTokens[T: Type](
+      value: Expr[T],
+      out: Expr[TokenWriter]
+  )(using
       ctx: Quotes
-  ): Expr[JsonObjectWriter[T]] =
-    new JsonWriterDerivationMacro { val quotes = ctx }.deriveJsonWriterForSum[T](None)
+  ): Expr[Unit] =
+    new JsonWriterDerivationMacro { val quotes = ctx }
+      .tokenize[T](value, None, out, None)
 
   @deprecated
-  def deriveJsonWriterForProductLegacy[T: Type](
+  def writeProductTokensLegacy[T: Type](
       config: Expr[WriterDerivationConfig],
-      mirror: Expr[Mirror.ProductOf[T]]
-  )(using ctx: Quotes): Expr[JsonObjectWriter[T]] =
+      mirror: Expr[Mirror.ProductOf[T]],
+      value: Expr[T],
+      out: Expr[TokenWriter]
+  )(using ctx: Quotes): Expr[Unit] =
     val derivation = new JsonWriterDerivationMacro { val quotes = ctx }
-    derivation.deriveJsonWriterForProduct[T](
-      derivation.parseLegacyWriterDerivationConfig[T](config, mirror)
+    derivation.tokenize[T](
+      value,
+      Some(derivation.parseLegacyWriterDerivationConfig[T](config, mirror)),
+      out,
+      None
     )
 
   @deprecated
-  def deriveJsonWriterForSumLegacy[T: Type](
-      config: Expr[WriterDerivationConfig]
-  )(using ctx: Quotes): Expr[JsonObjectWriter[T]] =
+  def writeSumTokensLegacy[T: Type](
+      config: Expr[WriterDerivationConfig],
+      value: Expr[T],
+      out: Expr[TokenWriter]
+  )(using ctx: Quotes): Expr[Unit] =
     val derivation = new JsonWriterDerivationMacro { val quotes = ctx }
-    derivation.deriveJsonWriterForSum[T](Some(derivation.parseLegacyDiscriminator[T](config)))
+    derivation.tokenize[T](
+      value,
+      None,
+      out,
+      Some(derivation.parseLegacyDiscriminator[T](config))
+    )
 
   def deriveJsonReaderForProduct[T: Type](
       config: Expr[ReaderBuilder[T]],
@@ -225,7 +243,9 @@ private[derivation] class DerivationMacro(val quotes: Quotes) extends JsonWriter
                                 if isStrict then
                                   '{
                                     ReaderError.wrongJson(
-                                      s"unexpected field '$jsonName', expected one of ${${ Expr(expectedFieldNames.mkString("'", "', '", "'")) }}"
+                                      s"unexpected field '$jsonName', expected one of ${${
+                                          Expr(expectedFieldNames.mkString("'", "', '", "'"))
+                                        }}"
                                     )
                                   }.asTerm
                                 else '{ it.skipExpression(); () }.asTerm
@@ -346,7 +366,6 @@ private[derivation] class DerivationMacro(val quotes: Quotes) extends JsonWriter
       if (acc.exists(_ =:= tpe)) acc
       else tpe :: acc
     }
-
 
   private def deriveMissingReaders(
       thisTpe: TypeRepr,
