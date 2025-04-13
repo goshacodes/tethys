@@ -48,6 +48,8 @@ class SemiautoWriterDerivationTest extends AnyFlatSpec with Matchers {
       )
     )
 
+    implicit val cWriter: JsonWriter[C] = jsonWriter
+
     implicit val testWriter: JsonWriter[JsonTreeTestData] = jsonWriter {
       WriterDerivationConfig.withFieldStyle(FieldStyle.UpperCase)
     }

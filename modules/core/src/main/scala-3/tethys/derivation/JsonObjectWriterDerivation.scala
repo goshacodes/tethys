@@ -18,36 +18,38 @@ private[tethys] trait JsonObjectWriterDerivation:
 
   inline def derived[A](inline config: WriterBuilder[A])(using
       mirror: Mirror.ProductOf[A]
-  ) =
-    Derivation.deriveJsonWriterForProduct[A](config, JsonConfiguration.default)
+  ): JsonObjectWriter[A] = new JsonObjectWriter[A]:
+    override def writeValues(value: A, tokenWriter: TokenWriter): Unit =
+      Derivation.writeProductTokens[A](config, value, tokenWriter)
 
   @deprecated("Use WriterBuilder instead")
   inline def derived[A](inline config: WriterDerivationConfig)(using
       mirror: Mirror.Of[A]
-  ) =
-    inline mirror match
-      case given Mirror.ProductOf[A] =>
-        Derivation.deriveJsonWriterForProductLegacy[A](config)
+  ): JsonObjectWriter[A] =
+    new JsonObjectWriter[A]:
+      override def writeValues(value: A, tokenWriter: TokenWriter): Unit =
+        inline mirror match
+          case given Mirror.ProductOf[A] =>
+            Derivation.writeProductTokensLegacy[A](config, value, tokenWriter)
 
-      case given Mirror.SumOf[A] =>
-        Derivation.deriveJsonWriterForSumLegacy[A](config)
+          case given Mirror.SumOf[A] =>
+            Derivation.writeSumTokensLegacy[A](config, value, tokenWriter)
+    
 
-  inline def derived[A](using mirror: Mirror.Of[A]): JsonObjectWriter[A] =
-    inline mirror match
-      case given Mirror.ProductOf[A] =>
-        Derivation.deriveJsonWriterForProduct[A](
-          summonFrom[WriterBuilder[A]] {
-            case config: WriterBuilder[A] =>
-              config
-            case _ => WriterBuilder[A]
-          },
-          summonFrom[JsonConfiguration] {
-            case jsonConfig: JsonConfiguration =>
-              jsonConfig
-            case _ => JsonConfiguration.default
+  inline def derived[A](using inline mirror: Mirror.Of[A]): JsonObjectWriter[A] =
+    new JsonObjectWriter[A]:
+      def writeValues(value: A, tokenWriter: TokenWriter): Unit =
+        inline mirror match
+          case given Mirror.ProductOf[A] =>
+            Derivation.writeProductTokens[A](
+              summonFrom[WriterBuilder[A]] {
+                case config: WriterBuilder[A] =>
+                  config
+                case _ => WriterBuilder[A]
+              },
+              value,
+              tokenWriter
+            )
 
-          }
-        )
-
-      case given Mirror.SumOf[A] =>
-        Derivation.deriveJsonWriterForSum[A]
+          case given Mirror.SumOf[A] =>
+            Derivation.writeSumTokens[A](value, tokenWriter)

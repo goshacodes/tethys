@@ -229,6 +229,7 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
 
   it should "derive reader for recursive type" in {
     given JsonReader[RecursiveType] = JsonReader.derived[RecursiveType]
+    given JsonWriter[RecursiveType] = JsonWriter.derived[RecursiveType]
 
     read[RecursiveType](
       obj(
@@ -846,7 +847,7 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
     inline given JsonConfiguration = JsonConfiguration.default
       .fieldStyle(FieldStyle.LowerSnakeCase)
 
-    case class Inner(innerField: String)
+    case class Inner(innerField: String) derives JsonWriter, JsonReader
     case class Outer(outerField: Inner) derives JsonWriter, JsonReader
 
     val model = Outer(Inner("foo"))
@@ -887,7 +888,7 @@ class DerivationSpec extends AnyFlatSpec with Matchers {
     inline given JsonConfiguration =
       JsonConfiguration.default.fieldStyle(FieldStyle.LowerSnakeCase)
 
-    case class Inner(innerField: String)
+    case class Inner(innerField: String) derives JsonWriter, JsonReader
     case class Outer(outerField: Inner) derives JsonWriter, JsonReader
 
     val model = Outer(Inner("foo"))
